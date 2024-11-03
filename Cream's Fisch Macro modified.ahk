@@ -1,3 +1,4 @@
+
 #SingleInstance, force
 
 ; === Enhanced Configuration System ===
@@ -7,6 +8,16 @@ global AUTO_RECOVERY := true
 global ENHANCED_TRACKING := true
 global ENABLE_PREDICTION := true
 global PATTERN_LEARNING := true
+
+; === Color Detection Arrays ===
+global Color_Reel := {"0x522929": 10
+    , "0x523733": 10
+    , "0x4B2D2D": 10
+    , "0x4F3329": 10
+    , "0x492D29": 10
+    , "0x523329": 10
+    , "0x4D2D29": 10
+    , "0x513329": 10}
 
 ; === Prediction System Variables ===
 global lastPositions := []
@@ -48,7 +59,6 @@ If !FileExist("Settings.ini") {
     IniWrite, 1, Settings.ini, Fisch, PatternLearning
 }
 
-; Read settings
 IniRead, Control, Settings.ini, Fisch, Control
 If (Control = "ERROR") {
     IniWrite, 0.05, Settings.ini, Fisch, Control
@@ -76,33 +86,50 @@ if GetRobloxHWND() {
     WinActivate, ahk_exe RobloxPlayerBeta.exe
     WinMove, ahk_exe RobloxPlayerBeta.exe,, x / 2 - 408, y / 2 - 408, 100, 100
     Sleep, 100
-    
-    if !WinActive("ahk_exe RobloxPlayerBeta.exe") {
-        Log("Failed to activate Roblox window")
-        Msgbox, Failed to activate Roblox window
-        ExitApp
-    }
 } else {
     Log("Roblox needs to be opened")
     Msgbox Roblox needs to be opened
     ExitApp
 }
 
-; === Enhanced Coordinate System ===
-global Left := 246
-global Top := 533
-global Right := 569
-global Bottom := 533
-global SearchWidth := Right - Left
-global SearchHeight := 4
+; === Original Coordinate System ===
+Left := 246
+Top := 533
+Right := 569
+Bottom := 533
 
-; === Color Definitions ===
-global Color_WhiteBar := 0xF1F1F1
-global Color_CatchBar := 0x434B5B
+; === Original Color Definitions ===
+Color_WhiteBar := 0xF1F1F1
+Color_CatchBar := 0x434B5B
 
-; === New Prediction System Functions ===
+; === Enhanced Helper Functions ===
+CheckReelColors() {
+    global Color_Reel, Left, Top, Right, Bottom
+    static lastCheckTime := 0
+    static lastResult := false
+    
+    currentTime := A_TickCount
+    if (currentTime - lastCheckTime < 50) {
+        return lastResult
+    }
+    
+    for Color, Tolerance in Color_Reel {
+        PixelSearch,,, Left, Top, Right, Bottom, Color, Tolerance, Fast RGB
+        if (ErrorLevel = 0) {
+            lastCheckTime := currentTime
+            lastResult := true
+            return true
+        }
+    }
+    
+    lastCheckTime := currentTime
+    lastResult := false
+    return false
+}
+
 UpdatePredictionData(currentPosition) {
-    global lastPositions, predictedDirection, movementPattern, patternLength, lastMoveTime, lastBarSpeed
+    global lastPositions, predictedDirection, movementPattern, patternLength
+    global lastMoveTime, lastBarSpeed
     
     currentTime := A_TickCount
     timeDiff := currentTime - lastMoveTime
@@ -113,34 +140,31 @@ UpdatePredictionData(currentPosition) {
     }
     
     lastMoveTime := currentTime
-    
     lastPositions.Push(currentPosition)
-    if (lastPositions.Length() > patternLength) {
-        lastPositions.RemoveAt(1)
-    }
     
+    if (lastPositions.Length() > patternLength)
+        lastPositions.RemoveAt(1)
+        
     if (lastPositions.Length() >= 2) {
         movement := lastPositions[lastPositions.Length()] - lastPositions[lastPositions.Length() - 1]
         movementPattern.Push(movement)
-        if (movementPattern.Length() > patternLength) {
+        if (movementPattern.Length() > patternLength)
             movementPattern.RemoveAt(1)
-        }
-        
+            
         predictedDirection := lastPositions[lastPositions.Length()] > lastPositions[lastPositions.Length() - 1] ? 1 : -1
     }
 }
 
-; === Enhanced Prediction and Detection Functions ===
 PredictNextPosition(currentPosition) {
-    global lastPositions, predictedDirection, predictionOffset, movementPattern, lastBarSpeed, lastMoveTime
+    global lastPositions, predictedDirection, predictionOffset, movementPattern
+    global lastBarSpeed, lastMoveTime
     
     if (lastPositions.Length() < 2)
         return currentPosition
+        
+    timeDiff := A_TickCount - lastMoveTime
+    velocityPrediction := currentPosition + (lastBarSpeed * timeDiff)
     
-    timeSinceLastMove := A_TickCount - lastMoveTime
-    velocityPrediction := currentPosition + (lastBarSpeed * timeSinceLastMove)
-    
-    ; Pattern-based prediction
     patternPrediction := currentPosition
     if (movementPattern.Length() >= 3) {
         avgMovement := 0
@@ -151,95 +175,13 @@ PredictNextPosition(currentPosition) {
         patternPrediction := currentPosition + (avgMovement * 1.5)
     }
     
-    ; Combine predictions
     finalPrediction := (velocityPrediction * 0.6) + (patternPrediction * 0.4)
-    
-    ; Ensure prediction stays within bounds
     finalPrediction := Max(Left + 5, Min(Right - 5, finalPrediction))
     
     return Round(finalPrediction)
 }
 
-ValidatePrediction(predictedPos, actualPos) {
-    global predictionAccuracy, successfulPredictions, totalPredictions
-    error := Abs(predictedPos - actualPos)
-    totalPredictions++
-    
-    if (error < 20) {
-        successfulPredictions++
-        predictionAccuracy += 0.1
-    } else {
-        predictionAccuracy -= 0.05
-    }
-    
-    predictionAccuracy := Max(0, Min(1, predictionAccuracy))
-    return error < 20
-}
-
-AnalyzePattern() {
-    global movementPattern, patternLength, patternMatchCount
-    
-    if (movementPattern.Length() < patternLength)
-        return false
-        
-    patterns := {}
-    maxCount := 0
-    dominantPattern := ""
-    
-    Loop, % movementPattern.Length() - 2 {
-        sequence := movementPattern[A_Index] . "," . movementPattern[A_Index + 1] . "," . movementPattern[A_Index + 2]
-        patterns[sequence] := (patterns[sequence] ? patterns[sequence] + 1 : 1)
-        
-        if (patterns[sequence] > maxCount) {
-            maxCount := patterns[sequence]
-            dominantPattern := sequence
-        }
-    }
-    
-    if (maxCount > 2) {
-        patternMatchCount++
-        return dominantPattern
-    }
-    return false
-}
-
-; === Enhanced Detection System ===
-DetectBarPosition(color, variation := 3) {
-    global Left, Top, Right, Bottom, ENHANCED_TRACKING
-    
-    if (ENHANCED_TRACKING) {
-        positions := []
-        Loop, 5 {
-            offset := (A_Index - 3) * 2
-            PixelSearch, foundX, foundY, Left, Top + offset, Right, Bottom + offset, color, variation, Fast RGB
-            if (ErrorLevel = 0) {
-                positions.Push(foundX)
-            }
-        }
-        
-        if (positions.Length() > 0) {
-            Sort positions
-            if (positions.Length() >= 3) {
-                positions.RemoveAt(1)
-                positions.RemoveAt(positions.Length())
-            }
-            
-            sum := 0
-            for index, value in positions {
-                sum += value
-            }
-            return Floor(sum / positions.Length())
-        }
-    } else {
-        PixelSearch, foundX, foundY, Left, Top, Right, Bottom, color, variation, Fast RGB
-        if (ErrorLevel = 0) {
-            return foundX
-        }
-    }
-    return 0
-}
-
-; === Main Enhanced Loop ===
+; === Original Main Loop with Enhancements ===
 Reels()
 Timer := A_TickCount
 
@@ -255,60 +197,111 @@ Loop {
         Timer := A_TickCount
     }
     
-    currentBarPos := DetectBarPosition(Color_WhiteBar, 20)
-    if (currentBarPos) {
-        catchBarPos := DetectBarPosition(Color_CatchBar, 3)
-        If (catchBarPos) {
+    ; Check for reel colors first
+    if (CheckReelColors()) {
+        Continue
+    }
+    
+    PixelSearch,,, Left, Top, Right, Bottom, Color_WhiteBar, 20, Fast RGB
+    if (ErrorLevel = 0) {
+        PixelSearch,,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+        If (ErrorLevel = 0) {
             HumanMouseMove(100, 400)
             
             Loop {
-                catchBarPos := DetectBarPosition(Color_CatchBar, 3)
-                if (!catchBarPos) {
+                PixelSearch,,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                if (ErrorLevel = 1) {
                     Reels()
-                    if (DEBUG_MODE) {
-                        Tooltip
-                    }
+                    Tooltip
                     Timer := A_TickCount
                     UpdatePerformanceStats(true)
                     Break
                 }
                 
-                currentBarPos := DetectBarPosition(Color_WhiteBar, 20)
-                If (currentBarPos) {
+                PixelSearch,,, Left, Top, Right, Bottom, Color_WhiteBar, 20, Fast RGB
+                If (ErrorLevel = 0) {
                     Loop {
-                        catchBarPos := DetectBarPosition(Color_CatchBar, 3)
-                        If (!catchBarPos) {
+                        PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                        If (ErrorLevel = 1) {
                             Break
-                        }
-                        
-                        if (ENABLE_PREDICTION) {
-                            UpdatePredictionData(catchBarPos)
-                            predictedPos := PredictNextPosition(catchBarPos)
-                            
-                            if (ValidatePrediction(lastPredictedPosition, catchBarPos)) {
-                                catchBarPos := predictedPos
-                            }
-                            
-                            lastPredictedPosition := predictedPos
-                        }
-                        
-                        If (catchBarPos <= (Control + Left + Rand(-10, 10))) {
-                            RandomSleep(30, 50)
-                            if (DEBUG_MODE) {
-                                Tooltip go left
-                            }
-                        } else If (catchBarPos >= (Right - Control + Rand(-10, 10))) {
-                            Click, Down
-                            if (DEBUG_MODE) {
-                                Tooltip go right
-                            }
-                            Loop {
-                                if (DEBUG_MODE) {
-                                    Tooltip, % A_Index
+                        } else {
+                            if (ENABLE_PREDICTION) {
+                                UpdatePredictionData(CurrentTarget)
+                                PredictedTarget := PredictNextPosition(CurrentTarget)
+                                if (Abs(PredictedTarget - CurrentTarget) < 20) {
+                                    CurrentTarget := PredictedTarget
                                 }
-                                catchBarPos := DetectBarPosition(Color_CatchBar, 3)
-                                If (catchBarPos) {
-                                    If (catchBarPos <= (Right - Control + Rand(-10, 10))) {
+                            }
+                            
+                            If (CurrentTarget <= (Control + Left + Rand(-10, 10))) {
+                                RandomSleep(30, 50)
+                                Tooltip go left
+                            } else If (CurrentTarget >= (Right - Control + Rand(-10, 10))) {
+                                Click, Down
+                                Tooltip go right
+                                Loop {
+                                    Tooltip, % A_Index
+                                    PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                                    If (ErrorLevel = 0) {
+                                        If (CurrentTarget <= (Right - Control + Rand(-10, 10))) {
+                                            Break
+                                        }
+                                    } else {
+                                        Break
+                                    }
+                                }
+                                Click, Up
+                                AtRight := True
+                            } else {
+                                PixelSearch, CurrentBarPosition,, Left, Top, Right, Bottom, Color_WhiteBar, 20, Fast RGB
+                                If (ErrorLevel = 0) {
+                                    PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                                    CurrentBarPosition := CurrentBarPosition + (Control / 2)
+                                    Distance := CurrentTarget - CurrentBarPosition
+                                    Percentage := (Distance / Control) * 100
+                                    Tooltip % Percentage "x" Distance "x" CurrentBarPosition
+                                    if (Percentage >= 0) {
+                                        Val := Floor(140 + ((440 - 140) * (Percentage / 100)))
+                                        Tooltip % Val
+                                        If (Val = 0) {
+                                            Reels(30)
+                                        } else {
+                                            Reels(Val)
+                                        }
+                                    } else {
+                                        Val := Floor(-((100 - 0) * (Percentage / 100)))
+                                        if (Val < 30) {
+                                            Tooltip, I'd click
+                                            Reels(30)
+                                        } else {
+                                            Tooltip % Val - 30 " sleep time"
+                                            RandomSleep(Val - 40, Val - 20)
+                                        }
+                                    }
+                                } else {
+                                    Break
+                                }
+                            }
+                        }
+                    }
+                    PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                    If (CurrentTarget > 408) {
+                        AtRight := True
+                    }
+                } else {
+                    PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                    If (ErrorLevel = 0) {
+                        If (CurrentTarget <= (Control + Left + Rand(-10, 10))) {
+                            RandomSleep(30, 50)
+                            Tooltip go left
+                        } else If (CurrentTarget >= (Right - Control - Rand(-10, 10))) {
+                            Click, Down
+                            Tooltip go right
+                            Loop {
+                                Tooltip, % A_Index " 2"
+                                PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                                If (ErrorLevel = 0) {
+                                    If (CurrentTarget <= (Right - Control + Rand(-10, 10))) {
                                         Break
                                     }
                                 } else {
@@ -316,21 +309,18 @@ Loop {
                                 }
                             }
                             Click, Up
-                            AtRight := True
                         } else {
-                            If (AtRight && (catchBarPos >= 408)) {
+                            If (AtRight && (CurrentTarget >= 408)) {
                                 RandomSleep(90, 110)
                                 AtRight := false
                             } else {
-                                if (DEBUG_MODE) {
-                                    Tooltip, I reel 300
-                                }
+                                Tooltip, I reel 300
                                 Reels(300, True)
                             }
                         }
-                        
-                        if (PATTERN_LEARNING && AnalyzePattern()) {
-                            predictionOffset := Max(10, Min(20, predictionOffset + (predictionAccuracy * 5)))
+                        PixelSearch, CurrentTarget,, Left, Top, Right, Bottom, Color_CatchBar, 3, Fast RGB
+                        If (CurrentTarget > 408) {
+                            AtRight := True
                         }
                     }
                 }
@@ -341,9 +331,8 @@ Loop {
 
 $Space::ExitApp
 
-; === Enhanced Original Functions ===
+; === Original Functions with Minor Enhancements ===
 Reels(x := 0, Stop := false) {
-    global
     If (!x) {
         RandomSleep(1800, 2200)
         Click, Down, 100, 400
@@ -360,13 +349,13 @@ Reels(x := 0, Stop := false) {
     
     Loop {
         If (Stop) {
-            if (ENHANCED_TRACKING) {
-                Whitebar := DetectBarPosition(0xF1F1F1, 20)
-            } else {
-                PixelSearch,,, 246, 533, 569, 533, 0xF1F1F1, 20, Fast RGB
-                Whitebar := (ErrorLevel = 0)
+            if (CheckReelColors()) {
+                Whitebar := true
+                Break
             }
-            If (Whitebar) {
+            PixelSearch,,, 246, 533, 569, 533, 0xF1F1F1, 20, Fast RGB
+            If (ErrorLevel = 0) {
+                Whitebar := true
                 Break
             }
         }
@@ -382,7 +371,6 @@ Reels(x := 0, Stop := false) {
 GetRobloxHWND() {
     if (hwnd := WinExist("Roblox ahk_exe RobloxPlayerBeta.exe"))
         return hwnd
-    return 0
 }
 
 Rand(min, max) {
@@ -419,4 +407,4 @@ UpdatePerformanceStats(success := true) {
     } else {
         failedCasts++
     }
-} ; WOW, NOW WITH 422 LINES
+} ; === IMPROVED, AND OPTIMIZED. 10 LINES LESS? WOW!!! now 410.
