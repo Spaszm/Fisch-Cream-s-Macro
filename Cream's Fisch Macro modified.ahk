@@ -1,4 +1,3 @@
-
 #SingleInstance, force
 
 ; === Enhanced Configuration System ===
